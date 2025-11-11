@@ -1,0 +1,26 @@
+version: '3.9'
+
+services:
+  rabbit:
+    image: rabbitmq:3.13-management
+    container_name: rabbit
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  wms:
+    build:
+      context: ./src/wms
+      dockerfile: Dockerfile
+    environment:
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      rabbit:
+        condition: service_healthy
+volumes:
+  pgdata:
