@@ -1,12 +1,23 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NestInterceptor,
+  ExecutionContext,
+  CallHandler,
+  Inject,
+} from '@nestjs/common';
 import { Observable, of } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import type { Cache } from 'cache-manager';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager'; // ✅ nur als Typ importieren
 
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
-  constructor(private cache: Cache) {}
-  async intercept(ctx: ExecutionContext, next: CallHandler): Promise<Observable<any>> {
+  constructor(@Inject(CACHE_MANAGER) private cache: Cache) {}
+
+  async intercept(
+    ctx: ExecutionContext,
+    next: CallHandler,
+  ): Promise<Observable<any>> {
     const req = ctx.switchToHttp().getRequest();
     const key = req.headers['idempotency-key'];
     if (!key) return next.handle();
@@ -17,7 +28,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(async (data) => {
         await this.cache.set(`idem:${key}`, data, 1800);
-      })
+      }),
     );
   }
 }

@@ -1,65 +1,144 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { Client, Transport } from '@nestjs/microservices';
+import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
+import { Controller, Post, Body } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { join } from 'path';
 
-interface InventoryServiceClient {
-  CheckAndReserve(data: {
+interface GRPCInventoryClient {
+  ReserveStock(data: {
     orderId: string;
     items: { productId: string; quantity: number }[];
   }): {
     toPromise(): Promise<{
-      status: number;
+      code: number;
       reservationId?: string;
       message?: string;
     }>;
   };
 
-  ReleaseReservation(data: { reservationId: string; orderId?: string }): {
+  ReleaseStock(data: { reservationId: string; orderId?: string }): {
     toPromise(): Promise<{ released: boolean; message?: string }>;
   };
 }
 
+interface LocalReservation {
+  id: string;
+  items: { sku: string; qty: number }[];
+}
+
 @Injectable()
-export class InventoryClient implements OnModuleInit {
-  private static readonly DEFAULT_PROTO = join(
-    process.cwd(),
-    'proto',
-    'inventory.proto',
-  );
-  private static readonly PROTO_PATH =
-    process.env.INVENTORY_PROTO_PATH || InventoryClient.DEFAULT_PROTO;
+export class InventoryGrpcClient implements OnModuleInit {
+  private svc!: GRPCInventoryClient;
 
-  @Client({
-    transport: Transport.GRPC,
-    options: {
-      url: process.env.INVENTORY_GRPC_URL || 'inventory:50051',
-      package: 'inventory',
-      protoPath: InventoryClient.PROTO_PATH,
-    },
-  })
-  private client!: ClientGrpc;
-
-  private svc!: InventoryServiceClient;
+  constructor(
+    @Inject('INVENTORY_GRPC_CLIENT') private readonly client: ClientGrpc,
+  ) {}
 
   onModuleInit() {
-    if (!this.client || typeof (this.client as any).getService !== 'function') {
-      throw new Error(
-        'gRPC client not initialized correctly. Ensure proto file exists and @grpc packages are installed.',
-      );
-    }
-    this.svc =
-      this.client.getService<InventoryServiceClient>('InventoryService');
+    this.svc = this.client.getService<GRPCInventoryClient>('InventoryService');
   }
 
-  async checkAndReserve(
+  async reserveViaGrpc(
     orderId: string,
     items: { productId: string; quantity: number }[],
   ) {
-    return this.svc.CheckAndReserve({ orderId, items }).toPromise();
+    return this.svc.ReserveStock({ orderId, items }).toPromise();
   }
 
-  async releaseReservation(reservationId: string, orderId?: string) {
-    return this.svc.ReleaseReservation({ reservationId, orderId }).toPromise();
+  async releaseViaGrpc(reservationId: string, orderId?: string) {
+    return this.svc.ReleaseStock({ reservationId, orderId }).toPromise();
+  }
+}
+
+@Injectable()
+export class LocalInventoryService {
+  private readonly logger = new Logger(LocalInventoryService.name);
+
+  private stock = new Map<string, number>([
+    ['SKU-123', 20],
+    ['SKU-456', 15],
+    ['SKU-789', 8],
+  ]);
+
+  private reservations = new Map<string, LocalReservation>();
+
+  reserve(items: { sku: string; qty: number }[]): string | null {
+    for (const it of items) {
+      if ((this.stock.get(it.sku) ?? 0) < it.qty) {
+        this.logger.warn(`Nicht genug Bestand für ${it.sku}`);
+        return null;
+      }
+    }
+    const resId = `res-${Date.now()}`;
+    items.forEach((it) =>
+      this.stock.set(it.sku, (this.stock.get(it.sku) ?? 0) - it.qty),
+    );
+    this.reservations.set(resId, { id: resId, items });
+    this.logger.log(`Reservierung erfolgreich: ${resId}`);
+    return resId;
+  }
+
+  commit(reservationId: string): boolean {
+    const res = this.reservations.get(reservationId);
+    if (!res) {
+      this.logger.warn(
+        `Commit fehlgeschlagen: ${reservationId} nicht gefunden`,
+      );
+      return false;
+    }
+    this.reservations.delete(reservationId);
+    this.logger.log(`Reservation ${reservationId} committed`);
+    return true;
+  }
+
+  release(reservationId: string): boolean {
+    const res = this.reservations.get(reservationId);
+    if (!res) {
+      this.logger.warn(
+        `Release fehlgeschlagen: ${reservationId} nicht gefunden`,
+      );
+      return false;
+    }
+    res.items.forEach((it) =>
+      this.stock.set(it.sku, (this.stock.get(it.sku) ?? 0) + it.qty),
+    );
+    this.reservations.delete(reservationId);
+    this.logger.log(`Reservation ${reservationId} freigegeben`);
+    return true;
+  }
+
+  getStock(sku: string): number {
+    return this.stock.get(sku) ?? 0;
+  }
+}
+
+@Controller('inventory')
+export class InventoryApiController {
+  private readonly logger = new Logger(InventoryApiController.name);
+
+  constructor(private readonly inventory: LocalInventoryService) {}
+
+  @Post('reserve')
+  async reserve(
+    @Body() body: { orderId: number; items: { sku: string; qty: number }[] },
+  ) {
+    this.logger.log(`Reservierung für Order ${body.orderId}`);
+    const resId = this.inventory.reserve(body.items);
+    return resId
+      ? { ok: true, reservationId: resId }
+      : { ok: false, reason: 'OUT_OF_STOCK' };
+  }
+
+  @Post('commit')
+  async commit(@Body() body: { reservationId: string }) {
+    this.logger.log(`Commit Reservation ${body.reservationId}`);
+    const ok = this.inventory.commit(body.reservationId);
+    return { ok };
+  }
+
+  @Post('release')
+  async release(@Body() body: { reservationId: string }) {
+    this.logger.warn(`Release Reservation ${body.reservationId}`);
+    const ok = this.inventory.release(body.reservationId);
+    return { ok };
   }
 }

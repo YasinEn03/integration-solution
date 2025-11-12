@@ -23,12 +23,13 @@ export class WmsBus implements OnModuleInit {
     try {
       await this.statusClient.connect();
       await this.logClient.connect();
-      // Initialize RabbitMQ connection if needed
       try {
         this.conn = await amqp.connect('amqp://guest:guest@127.0.0.1:5672');
         this.pub = await this.conn.createChannel();
         this.sub = await this.conn.createChannel();
-        await this.pub.assertExchange(this.exchange, 'topic', { durable: true });
+        await this.pub.assertExchange(this.exchange, 'topic', {
+          durable: true,
+        });
       } catch (err) {
         console.warn('RabbitMQ channel setup failed (optional):', err);
       }

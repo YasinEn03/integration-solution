@@ -4,34 +4,27 @@ import {
   Get,
   Param,
   Post,
+  HttpCode,
+  HttpStatus,
   UseInterceptors,
 } from '@nestjs/common';
-import { PaymentsService } from './payment.service';
-import { PaymentCreateDto } from './dto/payment-create.dto';
+import { PaymentService } from './payment.service';
 import { IdempotencyInterceptor } from '../common/idempotency.interceptor';
+import { OrderCreateDTO } from '../oms/dto/order-create.dto';
 
 @Controller('payments')
 @UseInterceptors(IdempotencyInterceptor)
 export class PaymentsController {
-  constructor(private svc: PaymentsService) {}
+  constructor(private readonly paymentSvc: PaymentService) {}
 
+  @HttpCode(HttpStatus.CREATED)
   @Post()
-  create(@Body() dto: PaymentCreateDto) {
-    return this.svc.create(dto);
+  async authorize(@Body() body: OrderCreateDTO) {
+    return this.paymentSvc.authorizePayment(body);
   }
 
   @Get(':paymentId')
-  get(@Param('paymentId') id: string) {
-    return this.svc.get(id);
-  }
-
-  @Post(':paymentId/capture')
-  capture(@Param('paymentId') id: string) {
-    return this.svc.capture(id);
-  }
-
-  @Post(':paymentId/refund')
-  refund(@Param('paymentId') id: string, @Body() body: { amount?: number }) {
-    return this.svc.refund(id, body?.amount);
+  async getOne(@Param('paymentId') paymentId: string) {
+    return { paymentId, status: 'Demo only' };
   }
 }

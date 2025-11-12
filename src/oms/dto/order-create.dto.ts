@@ -8,9 +8,9 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-class ItemDto {
+export class ItemDto {
   @IsString()
-  productId!: string;
+  productId!: number;
 
   @IsNumber()
   @Min(1)

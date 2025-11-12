@@ -22,8 +22,8 @@ class ItemDto {
 }
 
 export class OrderDto {
-  id!: number;
-  items!: ItemDto[];
+  id!: string;
+  items!: ItemDto[] | ItemDto;
   status!: OrderStatus;
   reason?: string;
 }

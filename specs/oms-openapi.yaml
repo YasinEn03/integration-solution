@@ -1,17 +1,15 @@
 openapi: 3.0.3
 info:
-  title: Shop AG – Combined API (OMS + Payments)
-  version: 1.1.0
-  description: >
+  title: Shop AG
+  version: 1.1.1
+  description: |
     Gemeinsame OpenAPI-Spezifikation für Order Management Service (OMS)
     und Payment Service. Für lokale Swagger-Tests sind die Server-URLs
     bereits CORS-sicher gesetzt (OMS relativ, Payments absolut auf localhost:3001).
 
 servers:
   - url: /api
-    description: Local OMS (dieser Prozess)
-  - url: http://localhost:3001/api
-    description: Local Payments (separater Service)
+    description: Local OMS
 
 tags:
   - name: OMS
@@ -23,81 +21,107 @@ paths:
   /orders:
     post:
       tags: [OMS]
-      summary: Auftrag anlegen (idempotent)
+      summary: Auftrag anlegen
       operationId: createOrder
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/OrderCreateRequest' }
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      productId:
+                        type: integer
+                      quantity:
+                        type: integer
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+              required:
+                - items
+                - firstName
+                - lastName
+            examples:
+              orderErfolgreich:
+                summary: Erfolgreiche Bestellung
+                value:
+                  items:
+                    - productId: 102
+                      quantity: 1
+                    - productId: 101
+                      quantity: 2
+                  firstName: Niklas
+                  lastName: Osimhen
+              reservierungFehlgeschlagen:
+                summary: Reservierung fehlgeschlagen
+                value:
+                  items:
+                    - productId: 101
+                      quantity: 1
+                    - productId: 103
+                      quantity: 12
+                  firstName: Niklas
+                  lastName: Osimhen
+              zahlungFehlgeschlagen:
+                summary: Bestellung angelegt, Zahlung schlägt fehl
+                value:
+                  items:
+                    - productId: 101
+                      quantity: 1
+                    - productId: 103
+                      quantity: 3
+                  firstName: Maxi
+                  lastName: Icardi
       responses:
         '201':
-          description: Order angelegt
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Order' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/Unprocessable' }
-    get:
-      tags: [OMS]
-      summary: Aufträge filtern
-      operationId: listOrders
-      responses:
-        '200':
-          description: Liste
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: '#/components/schemas/Order' }
+          description: Order erfolgreich angelegt
+        '400':
+          description: Ungültige Eingabe
+        '409':
+          description: Konflikt (z.B. doppelte Bestellung)
+        '422':
+          description: Reservierung fehlgeschlagen
+
   /orders/{orderId}:
     get:
       tags: [OMS]
       summary: Auftrag abrufen
       operationId: getOrder
       parameters:
-        - $ref: '#/components/parameters/OrderId'
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Order' }
-        '404': { $ref: '#/components/responses/NotFound' }
-  /orders/{orderId}/cancel:
-    post:
-      tags: [OMS]
-      summary: Auftrag stornieren
-      operationId: cancelOrder
-      parameters:
-        - $ref: '#/components/parameters/OrderId'
-      responses:
-        '200':
-          description: Storniert
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Order' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '404': { $ref: '#/components/responses/NotFound' }
-  /orders/{orderId}/status-updates:
-    post:
-      tags: [OMS]
-      summary: Status-Update registrieren (aus WMS-Events)
-      operationId: postStatusUpdate
-      parameters:
-        - $ref: '#/components/parameters/OrderId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/StatusUpdate' }
-      responses:
-        '202':
-          description: Update angenommen (asynchron verarbeitet)
+              schema:
+                type: object
+                properties:
+                  orderId:
+                    type: string
+                  status:
+                    type: string
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        productId:
+                          type: integer
+                        quantity:
+                          type: integer
+        '404':
+          description: Order nicht gefunden
 
   /payments:
     post:
@@ -108,67 +132,108 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/PaymentCreateRequest' }
+            schema:
+              type: object
+              properties:
+                orderId:
+                  type: string
+                amount:
+                  type: number
+                  format: float
+                currency:
+                  type: string
+                capture:
+                  type: boolean
+                  default: true
+                method:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: [CARD, SEPA, PAYPAL, MOCK]
+                    token:
+                      type: string
+                metadata:
+                  type: object
+                  additionalProperties: true
+            examples:
+              zahlungErfolgreich:
+                summary: Zahlung erfolgreich
+                value:
+                  orderId: '1'
+                  amount: 150.00
+                  currency: EUR
+                  capture: true
+                  method:
+                    type: MOCK
+                    token: 'token123'
+              zahlungFehlgeschlagen:
+                summary: Zahlung abgelehnt
+                value:
+                  orderId: '3'
+                  amount: 300.00
+                  currency: EUR
+                  capture: true
+                  method:
+                    type: MOCK
+                    token: 'fail_token'
       responses:
         '201':
-          description: Zahlung angelegt
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Payment' }
+          description: Zahlung erfolgreich angelegt
         '402':
           description: Zahlung abgelehnt
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Payment' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: Ungültige Eingabe
+
     get:
       tags: [Payments]
-      summary: Zahlungen auflisten (optional)
+      summary: Zahlungen auflisten
       operationId: listPayments
       responses:
         '200':
-          description: Liste
+          description: Liste aller Zahlungen
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: '#/components/schemas/Payment' }
-  /payments/{paymentId}:
-    get:
-      tags: [Payments]
-      summary: Zahlung abrufen
-      operationId: getPayment
-      parameters:
-        - $ref: '#/components/parameters/PaymentId'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Payment' }
-        '404': { $ref: '#/components/responses/NotFound' }
+                items:
+                  type: object
+                  properties:
+                    paymentId: { type: string }
+                    orderId: { type: string }
+                    status: { type: string }
+                    amount: { type: number, format: float }
+
   /payments/{paymentId}/capture:
     post:
       tags: [Payments]
       summary: Zahlung capturen
       operationId: capturePayment
       parameters:
-        - $ref: '#/components/parameters/PaymentId'
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '200':
-          description: Captured
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Payment' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '404': { $ref: '#/components/responses/NotFound' }
+          description: Zahlung erfolgreich capturt
+        '404':
+          description: Zahlung nicht gefunden
+        '409':
+          description: Konflikt
+
   /payments/{paymentId}/refund:
     post:
       tags: [Payments]
       summary: Zahlung (teil-)erstatten
       operationId: refundPayment
       parameters:
-        - $ref: '#/components/parameters/PaymentId'
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -177,192 +242,13 @@ paths:
               type: object
               properties:
                 amount:
-                  {
-                    type: number,
-                    format: float,
-                    description: 'Fehlt -> Vollrefund',
-                  }
+                  type: number
+                  format: float
+                  description: Optional, fehlend = Vollrefund
       responses:
         '200':
-          description: Refunded
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Payment' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-components:
-  parameters:
-    OrderId:
-      in: path
-      name: orderId
-      required: true
-      schema: { type: string }
-    PaymentId:
-      in: path
-      name: paymentId
-      required: true
-      schema: { type: string }
-
-  responses:
-    BadRequest:
-      description: Ungültige Eingabe
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    NotFound:
-      description: Ressource nicht gefunden
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    Conflict:
-      description: Konflikt (z. B. doppelte OrderId, falscher Status)
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    Unprocessable:
-      description: Semantisch fehlerhaft
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-
-  schemas:
-    ProblemDetails:
-      type: object
-      properties:
-        type: { type: string, format: uri }
-        title: { type: string }
-        status: { type: integer }
-        detail: { type: string }
-        instance: { type: string }
-        code: { type: string }
-        correlationId: { type: string }
-
-    OrderStatus:
-      type: string
-      enum:
-        [
-          RECEIVED,
-          RESERVED,
-          OUT_OF_STOCK,
-          PAYMENT_APPROVED,
-          PAYMENT_DECLINED,
-          FULFILLMENT_QUEUED,
-          PICKED,
-          PACKED,
-          SHIPPED,
-          CANCELED,
-          FAILED,
-        ]
-
-    Customer:
-      type: object
-      required: [customerId, prename, name]
-      properties:
-        customerId: { type: string }
-        prename: { type: string }
-        name: { type: string }
-        email: { type: string, format: email }
-
-    Address:
-      type: object
-      required: [street, city, zipCode, country]
-      properties:
-        street: { type: string }
-        city: { type: string }
-        zipCode: { type: string }
-        country: { type: string }
-
-    OrderItem:
-      type: object
-      required: [productId, quantity, price]
-      properties:
-        productId: { type: string }
-        quantity: { type: integer, minimum: 1 }
-        price: { type: number, format: float, description: 'Preis je Stück' }
-
-    OrderCreateRequest:
-      type: object
-      required: [orderId, customer, items, totalAmount, shippingAddress]
-      properties:
-        orderId: { type: string, description: 'Vom OMS oder Client vergeben' }
-        customer: { $ref: '#/components/schemas/Customer' }
-        items:
-          type: array
-          minItems: 1
-          items: { $ref: '#/components/schemas/OrderItem' }
-        totalAmount: { type: number, format: float }
-        shippingAddress: { $ref: '#/components/schemas/Address' }
-        notes: { type: string }
-
-    Order:
-      type: object
-      properties:
-        orderId: { type: string }
-        status: { $ref: '#/components/schemas/OrderStatus' }
-        customer: { $ref: '#/components/schemas/Customer' }
-        items:
-          type: array
-          items: { $ref: '#/components/schemas/OrderItem' }
-        totalAmount: { type: number, format: float }
-        currency: { type: string, default: EUR }
-        shippingAddress: { $ref: '#/components/schemas/Address' }
-        payment:
-          type: object
-          properties:
-            paymentId: { type: string }
-            status:
-              {
-                type: string,
-                enum: [PENDING, AUTHORIZED, CAPTURED, DECLINED, REFUNDED],
-              }
-        timestamps:
-          type: object
-          properties:
-            createdAt: { type: string, format: date-time }
-            updatedAt: { type: string, format: date-time }
-
-    StatusUpdate:
-      type: object
-      required: [eventType, occurredAt]
-      properties:
-        eventType:
-          { type: string, enum: [ITEMS_PICKED, ORDER_PACKED, ORDER_SHIPPED] }
-        occurredAt: { type: string, format: date-time }
-
-    PaymentMethod:
-      type: object
-      properties:
-        type: { type: string, enum: [CARD, SEPA, PAYPAL, MOCK] }
-        token: { type: string, description: 'Token/Referenz statt Rohdaten' }
-
-    PaymentCreateRequest:
-      type: object
-      required: [orderId, amount, currency]
-      properties:
-        orderId: { type: string }
-        amount: { type: number, format: float }
-        currency: { type: string, example: EUR }
-        capture: { type: boolean, default: true }
-        method: { $ref: '#/components/schemas/PaymentMethod' }
-        metadata:
-          type: object
-          additionalProperties: true
-
-    PaymentStatus:
-      type: string
-      enum: [PENDING, AUTHORIZED, CAPTURED, DECLINED, REFUNDED]
-
-    Payment:
-      type: object
-      properties:
-        paymentId: { type: string }
-        orderId: { type: string }
-        status: { $ref: '#/components/schemas/PaymentStatus' }
-        amount: { type: number, format: float }
-        currency: { type: string }
-        capturedAmount: { type: number, format: float }
-        refundedAmount: { type: number, format: float }
-        providerRef: { type: string }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+          description: Zahlung erfolgreich refundiert
+        '404':
+          description: Zahlung nicht gefunden
+        '409':
+          description: Konflikt

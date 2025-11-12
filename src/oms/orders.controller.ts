@@ -1,33 +1,46 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  HttpCode,
-  HttpStatus,
-} from '@nestjs/common';
-import { OrdersService } from './orders.service';
+import { Controller, Post, Body, Get, Param, Logger } from '@nestjs/common';
+import { OmsService, Order } from './orders.service';
 
 @Controller('orders')
 export class OrdersController {
-  constructor(private ordersService: OrdersService) {}
+  private readonly logger = new Logger(OrdersController.name);
 
-  @HttpCode(HttpStatus.CREATED)
+  constructor(private readonly omsService: OmsService) {}
+
   @Post()
-  async create(@Body() dto: any) {
-    return this.ordersService.createOrder(dto);
+  async create(
+    @Body() body: { items: any[]; firstName: string; lastName: string },
+  ) {
+    this.logger.log(`Empfange Bestellung: ${body.firstName} ${body.lastName}`);
+    try {
+      const order = await this.omsService.createOrder(body);
+      return { id: order.id, status: order.state, data: order };
+    } catch (err) {
+      this.logger.warn(
+        `Fehler beim Erstellen der Bestellung: ${err.message || err}`,
+      );
+      return {
+        message: 'Fehler beim Erstellen der Bestellung',
+        error: err.response || err.message || err,
+      };
+    }
+  }
+
+  @Get(':id')
+  getOrderById(@Param('id') id: string) {
+    try {
+      const order = this.omsService.getOrder(id);
+      return { data: order };
+    } catch (err) {
+      this.logger.warn(`OrderID ${id} nicht gefunden`);
+      return { message: 'Order not found', id };
+    }
   }
 
   @Get()
   getAll() {
-    const store = this.ordersService.getStore();
-    const orders = Array.from(store.values());
-    return { data: orders, count: orders.length };
-  }
-
-  @Get(':orderId')
-  getOne(@Param('orderId') id: string) {
-    return this.ordersService.getStore().get(id) ?? { message: 'not found' };
+    const ordersMap = this.omsService.getAllOrders();
+    const allOrders = Array.from(ordersMap.values());
+    return { data: allOrders, total: allOrders.length };
   }
 }
