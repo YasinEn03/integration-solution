@@ -19,7 +19,7 @@ export interface PaymentResult {
 export class PaymentService {
   private readonly logger = new Logger(PaymentService.name);
 
-  private catalog = { 'SKU-123': 7, 'SKU-456': 60, 'SKU-789': 9.77 };
+  private catalog = { 'SKU-1903': 7, 'SKU-1905': 60, 'SKU-1967': 9.77 };
   private accounts = {
     'amed diyarbakir': 200,
     'mock mock': 4.2,
