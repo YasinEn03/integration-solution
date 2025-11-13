@@ -50,9 +50,9 @@ paths:
                 summary: Erfolgreiche Bestellung
                 value:
                   items:
-                    - productId: 102
+                    - productId: 1967
                       quantity: 1
-                    - productId: 101
+                    - productId: 1903
                       quantity: 2
                   firstName: amed
                   lastName: diyarbakir
@@ -60,9 +60,9 @@ paths:
                 summary: Reservierung fehlgeschlagen
                 value:
                   items:
-                    - productId: 101
+                    - productId: 1903
                       quantity: 111
-                    - productId: 103
+                    - productId: 1905
                       quantity: 12
                   firstName: amed
                   lastName: diyarbakir
