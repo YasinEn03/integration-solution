@@ -12,7 +12,9 @@ export class WmsBus implements OnModuleInit {
   private conn!: amqp.Connection;
   private pub!: amqp.Channel;
   private sub!: amqp.Channel;
-  private readonly exchange = 'wms';
+
+  private readonly wmsExchange = 'wms';
+  private readonly logExchange = 'logs.topic';
 
   constructor(
     @Inject('WMS_STATUS_CLIENT') private readonly statusClient: ClientProxy,
@@ -23,21 +25,63 @@ export class WmsBus implements OnModuleInit {
     try {
       await this.statusClient.connect();
       await this.logClient.connect();
+
       try {
         this.conn = await amqp.connect('amqp://guest:guest@127.0.0.1:5672');
         this.pub = await this.conn.createChannel();
         this.sub = await this.conn.createChannel();
-        await this.pub.assertExchange(this.exchange, 'topic', {
+
+        await this.pub.assertExchange(this.wmsExchange, 'topic', {
           durable: true,
         });
+
+        await this.pub.assertExchange(this.logExchange, 'topic', {
+          durable: true,
+        });
+
       } catch (err) {
         console.warn('RabbitMQ channel setup failed (optional):', err);
       }
+
       console.log('WMS Clients verbunden');
+
     } catch (error) {
       console.error('FEHLER: WMS Clients konnten sich nicht verbinden', error);
     }
   }
+
+  async log(
+    service: string,
+    level: 'info' | 'warn' | 'error',
+    message: string,
+    context: any = {},
+  ) {
+    if (!this.pub) {
+      console.warn('RabbitMQ publisher not ready, skipping LOG');
+      return;
+    }
+
+    const entry = {
+      service,
+      level,
+      message,
+      context,
+      occurredAt: new Date().toISOString(),
+    };
+
+    const routingKey = `${service}.${level}`;
+
+    this.pub.publish(
+      this.logExchange,
+      routingKey,
+      Buffer.from(JSON.stringify(entry)),
+      {
+        contentType: 'application/json',
+        persistent: true,
+      },
+    );
+  }
+
   async publishFulfillmentCreated(payload: any) {
     if (!this.pub) {
       console.warn('RabbitMQ publisher not ready, skipping publish');
@@ -48,7 +92,7 @@ export class WmsBus implements OnModuleInit {
       occurredAt: new Date().toISOString(),
     };
     this.pub.publish(
-      this.exchange,
+      this.wmsExchange,
       'fulfillment.created',
       Buffer.from(JSON.stringify(msg)),
       {
@@ -67,6 +111,7 @@ export class WmsBus implements OnModuleInit {
       console.warn('RabbitMQ subscriber not ready');
       return;
     }
+
     await this.sub.consume(
       queueName,
       async (msg) => {

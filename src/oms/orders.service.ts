@@ -1,7 +1,8 @@
 import { Injectable, HttpException, HttpStatus, Inject } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
 import axios from 'axios';
 import { v4 as uuid } from 'uuid';
+import { WmsBus } from '../wms/wms.messaging';
+import { ClientProxy } from '@nestjs/microservices';
 
 export enum OrderState {
   RECEIVED = 'RECEIVED',
@@ -34,19 +35,10 @@ export class OmsService {
 
   constructor(
     @Inject('WMS_CLIENT') private readonly wms: ClientProxy,
-    @Inject('LOG_CLIENT') private readonly logger: ClientProxy,
+    private readonly wmsBus: WmsBus,    // ← Logger!
     @Inject('INVENTORY_SERVICE_URL') private readonly inventoryUrl: string,
     @Inject('PAYMENT_SERVICE_URL') private readonly paymentUrl: string,
   ) {}
-
-  private async log(level: 'info' | 'warn' | 'error', message: string) {
-    this.logger.emit('log_message', {
-      service: 'OMS',
-      level,
-      message,
-      timestamp: new Date().toISOString(),
-    });
-  }
 
   private mapToSku(items: OrderItem[]): { sku: string; qty: number }[] {
     return items.map((i) => ({ sku: `SKU-${i.productId}`, qty: i.quantity }));
@@ -69,13 +61,15 @@ export class OmsService {
       },
     };
     this.orders.set(orderId, order);
-    await this.log('info', `Order ${orderId} empfangen.`);
+
+    await this.wmsBus.log('oms', 'info', `Order ${orderId} empfangen`, { orderId });
 
     // ---------------------------
     // 1️⃣ Inventory reservieren
     // ---------------------------
     const itemsForInventory = this.mapToSku(body.items);
     let reservationId: string;
+
     try {
       const res = await axios.post<{
         ok: boolean;
@@ -89,33 +83,38 @@ export class OmsService {
       if (!res.data.ok || !res.data.reservationId) {
         order.state = OrderState.CANCELLED;
         this.orders.set(orderId, order);
-        await this.log(
+
+        await this.wmsBus.log(
+          'oms',
           'warn',
           `Order ${orderId} abgelehnt: ${res.data.reason || 'OUT_OF_STOCK'}`,
+          { orderId }
         );
-        throw new HttpException(
-          'Inventory Reservation failed',
-          HttpStatus.CONFLICT,
-        );
+
+        throw new HttpException('Inventory Reservation failed', HttpStatus.CONFLICT);
       }
 
-      reservationId = res.data.reservationId!;
+      reservationId = res.data.reservationId;
       order.reservationId = reservationId;
       order.state = OrderState.RESERVED;
       this.orders.set(orderId, order);
-      await this.log(
+
+      await this.wmsBus.log(
+        'oms',
         'info',
-        `Order ${orderId} reserviert (ReservationId=${reservationId})`,
+        `Order ${orderId} reserviert (reservationId=${reservationId})`,
+        { orderId, reservationId }
       );
+
     } catch (err) {
-      await this.log(
+      await this.wmsBus.log(
+        'oms',
         'error',
         `Inventory-Service nicht erreichbar für Order ${orderId}`,
+        { orderId }
       );
-      throw new HttpException(
-        'Inventory Service unreachable',
-        HttpStatus.BAD_GATEWAY,
-      );
+
+      throw new HttpException('Inventory Service unreachable', HttpStatus.BAD_GATEWAY);
     }
 
     // ---------------------------
@@ -127,7 +126,6 @@ export class OmsService {
         0,
       );
 
-      // POST an den Payment-Service
       const payRes = await axios.post<{ success: boolean; reason?: string }>(
         `${this.paymentUrl}`,
         {
@@ -143,12 +141,17 @@ export class OmsService {
         await axios.post(`${this.inventoryUrl}/inventory/release`, {
           reservationId,
         });
+
         order.state = OrderState.PAYMENT_FAILED;
         this.orders.set(orderId, order);
-        await this.log(
+
+        await this.wmsBus.log(
+          'oms',
           'warn',
           `Payment fehlgeschlagen für Order ${orderId}: ${payRes.data.reason}`,
+          { orderId }
         );
+
         throw new HttpException('Payment failed', HttpStatus.PAYMENT_REQUIRED);
       }
 
@@ -156,21 +159,25 @@ export class OmsService {
       order.state = OrderState.PAID;
       order.timestamps.updated = new Date().toISOString();
       this.orders.set(orderId, order);
-      await this.log('info', `Payment erfolgreich für Order ${orderId}`);
-    } catch (err) {
-      await axios.post(`${this.inventoryUrl}/inventory/release`, {
-        reservationId,
+
+      await this.wmsBus.log('oms', 'info', `Payment erfolgreich für Order ${orderId}`, {
+        orderId,
       });
+
+    } catch (err) {
+      await axios.post(`${this.inventoryUrl}/inventory/release`, { reservationId });
+
       order.state = OrderState.CANCELLED;
       this.orders.set(orderId, order);
-      await this.log(
+
+      await this.wmsBus.log(
+        'oms',
         'error',
         `Payment-Service nicht erreichbar für Order ${orderId}`,
+        { orderId }
       );
-      throw new HttpException(
-        'Payment Service unreachable',
-        HttpStatus.BAD_GATEWAY,
-      );
+
+      throw new HttpException('Payment Service unreachable', HttpStatus.BAD_GATEWAY);
     }
 
     // ---------------------------
@@ -182,19 +189,26 @@ export class OmsService {
       customer: body,
       reservationId,
     });
+
     order.state = OrderState.FULFILLMENT_REQUESTED;
     this.orders.set(orderId, order);
-    await this.log('info', `Order ${orderId} an WMS gesendet`);
+
+    await this.wmsBus.log('oms', 'info', `Order ${orderId} an WMS gesendet`, {
+      orderId,
+      reservationId,
+    });
 
     return order;
   }
 
   getOrder(id: string): OrderRecord {
     const order = this.orders.get(id);
+
     if (!order) {
-      this.log('warn', `Order ${id} nicht gefunden`);
+      this.wmsBus.log('oms', 'warn', `Order ${id} nicht gefunden`, { id });
       throw new HttpException('Order not found', HttpStatus.NOT_FOUND);
     }
+
     return order;
   }
 
