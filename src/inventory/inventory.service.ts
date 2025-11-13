@@ -11,9 +11,9 @@ export class LocalInventoryService {
   private readonly logger = new Logger(LocalInventoryService.name);
 
   private stock = new Map<string, number>([
-    ['SKU-123', 20],
-    ['SKU-456', 15],
-    ['SKU-789', 8],
+    ['SKU-1903', 20],
+    ['SKU-1905', 15],
+    ['SKU-1967', 8],
   ]);
 
   private reservations = new Map<string, LocalReservation>();
