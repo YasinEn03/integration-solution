@@ -7,10 +7,10 @@ import {
   HttpCode,
   HttpStatus,
   UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { IdempotencyInterceptor } from '../common/idempotency.interceptor';
-import { OrderCreateDTO } from '../oms/dto/order-create.dto';
 
 @Controller('payments')
 @UseInterceptors(IdempotencyInterceptor)
@@ -19,8 +19,16 @@ export class PaymentsController {
 
   @HttpCode(HttpStatus.CREATED)
   @Post()
-  async authorize(@Body() body: OrderCreateDTO) {
-    return this.paymentSvc.authorizePayment(body);
+  async authorize(@Body() body: any) {
+    try {
+      const result = this.paymentSvc.authorizePayment(body);
+      return result;
+    } catch (err) {
+      if (err instanceof BadRequestException) {
+        throw err;
+      }
+      throw new BadRequestException(err.message || 'Payment failed');
+    }
   }
 
   @Get(':paymentId')

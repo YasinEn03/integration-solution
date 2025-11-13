@@ -3,8 +3,8 @@ syntax = "proto3";
 package inventory;
 
 service InventoryService {
-  rpc CheckAndReserve (ReserveRequest) returns (ReserveResponse);
-  rpc ReleaseReservation (ReleaseRequest) returns (ReleaseResponse);
+  rpc ReserveStock(ReserveRequest) returns (ReserveResponse);
+  rpc ReleaseStock(ReleaseRequest) returns (ReleaseResponse);
 }
 
 message ReserveRequest {

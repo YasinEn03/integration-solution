@@ -1,19 +1,10 @@
 import { Module } from '@nestjs/common';
-import {
-  InventoryGrpcClient,
-  LocalInventoryService,
-  InventoryApiController,
-} from './inventory.client';
+import { LocalInventoryService } from './inventory.service';
+import { InventoryApiController } from './inventory.controller';
 
 @Module({
-  providers: [
-    LocalInventoryService,
-    {
-      provide: 'INVENTORY_GRPC_CLIENT', // <-- Token für DI
-      useClass: InventoryGrpcClient,
-    },
-  ],
   controllers: [InventoryApiController],
-  exports: ['INVENTORY_GRPC_CLIENT'], // <-- damit OmsModule es importieren kann
+  exports: [LocalInventoryService],
+  providers: [LocalInventoryService],
 })
 export class InventoryModule {}

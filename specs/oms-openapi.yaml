@@ -14,8 +14,6 @@ servers:
 tags:
   - name: OMS
     description: Order Management Endpunkte
-  - name: Payments
-    description: Payment Endpunkte
 
 paths:
   /orders:
@@ -56,18 +54,18 @@ paths:
                       quantity: 1
                     - productId: 101
                       quantity: 2
-                  firstName: Niklas
-                  lastName: Osimhen
+                  firstName: amed
+                  lastName: diyarbakir
               reservierungFehlgeschlagen:
                 summary: Reservierung fehlgeschlagen
                 value:
                   items:
                     - productId: 101
-                      quantity: 1
+                      quantity: 111
                     - productId: 103
                       quantity: 12
-                  firstName: Niklas
-                  lastName: Osimhen
+                  firstName: amed
+                  lastName: diyarbakir
               zahlungFehlgeschlagen:
                 summary: Bestellung angelegt, Zahlung schlägt fehl
                 value:
@@ -76,8 +74,8 @@ paths:
                       quantity: 1
                     - productId: 103
                       quantity: 3
-                  firstName: Maxi
-                  lastName: Icardi
+                  firstName: mock
+                  lastName: mock
       responses:
         '201':
           description: Order erfolgreich angelegt
@@ -122,133 +120,3 @@ paths:
                           type: integer
         '404':
           description: Order nicht gefunden
-
-  /payments:
-    post:
-      tags: [Payments]
-      summary: Zahlung anlegen (Authorize + optional Capture)
-      operationId: createPayment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                orderId:
-                  type: string
-                amount:
-                  type: number
-                  format: float
-                currency:
-                  type: string
-                capture:
-                  type: boolean
-                  default: true
-                method:
-                  type: object
-                  properties:
-                    type:
-                      type: string
-                      enum: [CARD, SEPA, PAYPAL, MOCK]
-                    token:
-                      type: string
-                metadata:
-                  type: object
-                  additionalProperties: true
-            examples:
-              zahlungErfolgreich:
-                summary: Zahlung erfolgreich
-                value:
-                  orderId: '1'
-                  amount: 150.00
-                  currency: EUR
-                  capture: true
-                  method:
-                    type: MOCK
-                    token: 'token123'
-              zahlungFehlgeschlagen:
-                summary: Zahlung abgelehnt
-                value:
-                  orderId: '3'
-                  amount: 300.00
-                  currency: EUR
-                  capture: true
-                  method:
-                    type: MOCK
-                    token: 'fail_token'
-      responses:
-        '201':
-          description: Zahlung erfolgreich angelegt
-        '402':
-          description: Zahlung abgelehnt
-        '400':
-          description: Ungültige Eingabe
-
-    get:
-      tags: [Payments]
-      summary: Zahlungen auflisten
-      operationId: listPayments
-      responses:
-        '200':
-          description: Liste aller Zahlungen
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    paymentId: { type: string }
-                    orderId: { type: string }
-                    status: { type: string }
-                    amount: { type: number, format: float }
-
-  /payments/{paymentId}/capture:
-    post:
-      tags: [Payments]
-      summary: Zahlung capturen
-      operationId: capturePayment
-      parameters:
-        - name: paymentId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Zahlung erfolgreich capturt
-        '404':
-          description: Zahlung nicht gefunden
-        '409':
-          description: Konflikt
-
-  /payments/{paymentId}/refund:
-    post:
-      tags: [Payments]
-      summary: Zahlung (teil-)erstatten
-      operationId: refundPayment
-      parameters:
-        - name: paymentId
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                amount:
-                  type: number
-                  format: float
-                  description: Optional, fehlend = Vollrefund
-      responses:
-        '200':
-          description: Zahlung erfolgreich refundiert
-        '404':
-          description: Zahlung nicht gefunden
-        '409':
-          description: Konflikt

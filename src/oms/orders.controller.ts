@@ -1,5 +1,5 @@
 import { Controller, Post, Body, Get, Param, Logger } from '@nestjs/common';
-import { OmsService, Order } from './orders.service';
+import { OmsService } from './orders.service';
 
 @Controller('orders')
 export class OrdersController {

@@ -12,7 +12,7 @@ import { CacheModule } from '@nestjs/cache-manager';
     }),
   ],
   controllers: [PaymentsController],
-  exports: [PaymentService, IdempotencyInterceptor],
+  exports: [PaymentService],
   providers: [PaymentService, IdempotencyInterceptor],
 })
 export class PaymentModule {}

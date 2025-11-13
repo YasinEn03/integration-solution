@@ -3,13 +3,11 @@ import { OrdersController } from './orders.controller';
 import { OmsService } from './orders.service';
 import { Transport, ClientsModule } from '@nestjs/microservices';
 import { WmsModule } from 'src/wms/wms.module';
-import { InventoryModule } from 'src/inventory/inventory.module';
 import { PaymentModule } from 'src/payment/payment.module';
 
 @Module({
   imports: [
     WmsModule,
-    InventoryModule, // <-- InventoryModule importiert
     PaymentModule,
     ClientsModule.register([
       {
@@ -33,6 +31,16 @@ import { PaymentModule } from 'src/payment/payment.module';
     ]),
   ],
   controllers: [OrdersController],
-  providers: [OmsService],
+  providers: [
+    OmsService,
+    {
+      provide: 'INVENTORY_SERVICE_URL',
+      useValue: process.env.INVENTORY_SERVICE_URL || 'http://localhost:3002',
+    },
+    {
+      provide: 'PAYMENT_SERVICE_URL',
+      useValue: 'http://localhost:3001/payments',
+    },
+  ],
 })
 export class OmsModule {}

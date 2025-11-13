@@ -6,67 +6,59 @@ import { v4 as uuid } from 'uuid';
 export enum OrderState {
   RECEIVED = 'RECEIVED',
   RESERVED = 'RESERVED',
-  CANCELLED = 'CANCELLED',
+  PAYMENT_FAILED = 'PAYMENT_FAILED',
   PAID = 'PAID',
   FULFILLMENT_REQUESTED = 'FULFILLMENT_REQUESTED',
-  PAYMENT_FAILED = 'PAYMENT_FAILED',
+  CANCELLED = 'CANCELLED',
 }
 
-export interface Item {
+export interface OrderItem {
   productId: number;
   quantity: number;
-  unitPrice?: number;
+  pricePerUnit?: number;
 }
 
-export interface Order {
+export interface OrderRecord {
   id: string;
-  items: Item[];
+  items: OrderItem[];
   state: OrderState;
   reservationId?: string;
   paymentId?: string;
-  paymentStatus?: string;
-  customer?: { firstName: string; lastName: string };
+  customer: { firstName: string; lastName: string };
   timestamps: { created: string; updated: string };
-}
-
-export interface InventoryGrpcClient {
-  reserveViaGrpc(
-    orderId: string,
-    items: { productId: number; quantity: number }[],
-  ): Promise<{ code: number; reservationId?: string }>;
-  releaseViaGrpc(
-    reservationId: string,
-    orderId?: string,
-  ): Promise<{ released: boolean }>;
 }
 
 @Injectable()
 export class OmsService {
-  private orders = new Map<string, Order>();
+  private orders = new Map<string, OrderRecord>();
 
   constructor(
-    @Inject('WMS_CLIENT') private readonly wmsClient: ClientProxy,
-    @Inject('LOG_CLIENT') private readonly logClient: ClientProxy,
-    @Inject('INVENTORY_GRPC_CLIENT')
-    private readonly inventoryClient: InventoryGrpcClient,
+    @Inject('WMS_CLIENT') private readonly wms: ClientProxy,
+    @Inject('LOG_CLIENT') private readonly logger: ClientProxy,
+    @Inject('INVENTORY_SERVICE_URL') private readonly inventoryUrl: string,
+    @Inject('PAYMENT_SERVICE_URL') private readonly paymentUrl: string,
   ) {}
 
-  private log(level: 'info' | 'warn' | 'error', msg: string) {
-    this.logClient.emit('log_message', {
+  private async log(level: 'info' | 'warn' | 'error', message: string) {
+    this.logger.emit('log_message', {
       service: 'OMS',
       level,
-      message: msg,
+      message,
       timestamp: new Date().toISOString(),
     });
   }
 
+  private mapToSku(items: OrderItem[]): { sku: string; qty: number }[] {
+    return items.map((i) => ({ sku: `SKU-${i.productId}`, qty: i.quantity }));
+  }
+
   async createOrder(body: {
-    items: Item[];
+    items: OrderItem[];
     firstName: string;
     lastName: string;
-  }): Promise<Order> {
+  }): Promise<OrderRecord> {
     const orderId = uuid();
-    const order: Order = {
+    const order: OrderRecord = {
       id: orderId,
       items: body.items,
       state: OrderState.RECEIVED,
@@ -77,65 +69,83 @@ export class OmsService {
       },
     };
     this.orders.set(orderId, order);
-    this.log('info', `Order ${orderId} empfangen.`);
+    await this.log('info', `Order ${orderId} empfangen.`);
 
-    // --- Inventory via gRPC reservieren ---
+    // ---------------------------
+    // 1️⃣ Inventory reservieren
+    // ---------------------------
+    const itemsForInventory = this.mapToSku(body.items);
     let reservationId: string;
     try {
-      const grpcRes = await this.inventoryClient.reserveViaGrpc(
+      const res = await axios.post<{
+        ok: boolean;
+        reservationId?: string;
+        reason?: string;
+      }>(`${this.inventoryUrl}/inventory/reserve`, {
         orderId,
-        body.items,
-      );
-      if (grpcRes.code !== 0 || !grpcRes.reservationId) {
+        items: itemsForInventory,
+      });
+
+      if (!res.data.ok || !res.data.reservationId) {
         order.state = OrderState.CANCELLED;
         this.orders.set(orderId, order);
-        this.log('warn', `Order ${orderId} abgelehnt: Out of stock`);
+        await this.log(
+          'warn',
+          `Order ${orderId} abgelehnt: ${res.data.reason || 'OUT_OF_STOCK'}`,
+        );
         throw new HttpException(
           'Inventory Reservation failed',
           HttpStatus.CONFLICT,
         );
       }
-      reservationId = grpcRes.reservationId;
+
+      reservationId = res.data.reservationId!;
       order.reservationId = reservationId;
       order.state = OrderState.RESERVED;
       this.orders.set(orderId, order);
-      this.log(
+      await this.log(
         'info',
         `Order ${orderId} reserviert (ReservationId=${reservationId})`,
       );
     } catch (err) {
-      this.log('error', `Inventory Service unreachable für Order ${orderId}`);
+      await this.log(
+        'error',
+        `Inventory-Service nicht erreichbar für Order ${orderId}`,
+      );
       throw new HttpException(
         'Inventory Service unreachable',
         HttpStatus.BAD_GATEWAY,
       );
     }
 
-    // --- Payment via HTTP prüfen ---
+    // ---------------------------
+    // 2️⃣ Payment autorisieren
+    // ---------------------------
     try {
-      const totalAmount = order.items.reduce(
-        (acc, i) => acc + (i.unitPrice || 0) * i.quantity,
+      const total = order.items.reduce(
+        (sum, i) => sum + (i.pricePerUnit || 0) * i.quantity,
         0,
       );
+
+      // POST an den Payment-Service
       const payRes = await axios.post<{ success: boolean; reason?: string }>(
-        `${
-          process.env.PAYMENT_SERVICE_URL ||
-          'http://localhost:3000/api/payments'
-        }/authorize`,
+        `${this.paymentUrl}`,
         {
           orderId,
           items: order.items,
           firstName: body.firstName,
           lastName: body.lastName,
-          amount: totalAmount,
+          amount: total,
         },
       );
 
       if (!payRes.data.success) {
-        await this.inventoryClient.releaseViaGrpc(reservationId, orderId);
+        await axios.post(`${this.inventoryUrl}/inventory/release`, {
+          reservationId,
+        });
         order.state = OrderState.PAYMENT_FAILED;
         this.orders.set(orderId, order);
-        this.log(
+        await this.log(
           'warn',
           `Payment fehlgeschlagen für Order ${orderId}: ${payRes.data.reason}`,
         );
@@ -143,24 +153,30 @@ export class OmsService {
       }
 
       order.paymentId = uuid();
-      order.paymentStatus = 'AUTHORIZED';
       order.state = OrderState.PAID;
       order.timestamps.updated = new Date().toISOString();
       this.orders.set(orderId, order);
-      this.log('info', `Payment erfolgreich für Order ${orderId}`);
+      await this.log('info', `Payment erfolgreich für Order ${orderId}`);
     } catch (err) {
-      await this.inventoryClient.releaseViaGrpc(reservationId, orderId);
+      await axios.post(`${this.inventoryUrl}/inventory/release`, {
+        reservationId,
+      });
       order.state = OrderState.CANCELLED;
       this.orders.set(orderId, order);
-      this.log('error', `Payment Service unreachable für Order ${orderId}`);
+      await this.log(
+        'error',
+        `Payment-Service nicht erreichbar für Order ${orderId}`,
+      );
       throw new HttpException(
         'Payment Service unreachable',
         HttpStatus.BAD_GATEWAY,
       );
     }
 
-    // --- WMS benachrichtigen ---
-    this.wmsClient.emit('order_received', {
+    // ---------------------------
+    // 3️⃣ WMS benachrichtigen
+    // ---------------------------
+    this.wms.emit('order_received', {
       orderId,
       items: order.items,
       customer: body,
@@ -168,12 +184,12 @@ export class OmsService {
     });
     order.state = OrderState.FULFILLMENT_REQUESTED;
     this.orders.set(orderId, order);
-    this.log('info', `Order ${orderId} an WMS gesendet`);
+    await this.log('info', `Order ${orderId} an WMS gesendet`);
 
     return order;
   }
 
-  getOrder(id: string): Order {
+  getOrder(id: string): OrderRecord {
     const order = this.orders.get(id);
     if (!order) {
       this.log('warn', `Order ${id} nicht gefunden`);
@@ -182,7 +198,7 @@ export class OmsService {
     return order;
   }
 
-  getAllOrders(): Map<string, Order> {
+  getAllOrders(): Map<string, OrderRecord> {
     return this.orders;
   }
 }

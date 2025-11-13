@@ -1,9 +1,5 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { InventoryModule } from './inventory/inventory.module';
-import { InventoryGrpcClient } from './inventory/inventory.client';
-import { Transport } from '@nestjs/microservices';
-import { join } from 'path';
 import {
   ValidationPipe,
   Injectable,
@@ -15,6 +11,7 @@ import { v4 as uuid } from 'uuid';
 import { ProblemDetailsFilter } from './common/problem-details.filter';
 import * as swaggerUi from 'swagger-ui-express';
 import * as fs from 'fs';
+import { join } from 'path';
 
 @Injectable()
 class CorrelationIdMiddleware implements NestMiddleware {
@@ -33,27 +30,10 @@ function loadYamlSpec(relativePath: string) {
 }
 
 async function bootstrap() {
-  const INVENTORY_URL = process.env.INVENTORY_GRPC_URL || '127.0.0.1:50051';
+  // ---------------------------
+  // 1️⃣ OMS HTTP API starten
+  // ---------------------------
   const OMS_PORT = parseInt(process.env.PORT || '3000', 10);
-
-  // ---------------------------
-  // 1️⃣ Inventory gRPC Microservice starten
-  // ---------------------------
-  const inventoryApp = await NestFactory.createMicroservice(InventoryModule, {
-    transport: Transport.GRPC,
-    options: {
-      package: 'inventory',
-      protoPath: join(process.cwd(), 'proto/inventory.proto'),
-      url: INVENTORY_URL,
-    },
-  });
-
-  await inventoryApp.listen();
-  console.log(`✅ Inventory gRPC service running on ${INVENTORY_URL}`);
-
-  // ---------------------------
-  // 2️⃣ OMS HTTP API starten
-  // ---------------------------
   const app = await NestFactory.create(AppModule);
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -66,8 +46,6 @@ async function bootstrap() {
 
   // Swagger/OpenAPI
   const specPath = 'specs/oms-openapi.yaml';
-  if (!fs.existsSync(join(process.cwd(), specPath)))
-    throw new Error('OpenAPI spec not found');
   const openApiDoc = loadYamlSpec(specPath);
 
   app.use(
@@ -82,28 +60,13 @@ async function bootstrap() {
     res.json({ ok: true, target: process.env.PAYMENT_SERVICE_URL });
   });
 
-  // ---------------------------
-  // 3️⃣ gRPC Client auf Ready-State warten
-  // ---------------------------
-  const inventoryClient = app.get<InventoryGrpcClient>(InventoryGrpcClient);
-  await new Promise<void>((resolve, reject) => {
-    const grpcRaw = (inventoryClient as any).client['client'];
-    grpcRaw.waitForReady(Date.now() + 5000, (err: any) => {
-      if (err) return reject(err);
-      console.log('✅ Inventory gRPC client ready');
-      resolve();
-    });
-  });
-
-  // ---------------------------
-  // 4️⃣ OMS HTTP starten
-  // ---------------------------
+  // OMS HTTP starten
   await app.listen(OMS_PORT);
   console.log(`✅ OMS HTTP API running on http://localhost:${OMS_PORT}`);
   console.log(`📘 Swagger docs: http://localhost:${OMS_PORT}/docs`);
 }
 
 bootstrap().catch((err) => {
-  console.error('Bootstrap failed:', err?.stack || err);
+  console.error('OMS bootstrap failed:', err?.stack || err);
   process.exit(1);
 });

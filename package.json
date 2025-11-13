@@ -5,6 +5,8 @@
   "license": "MIT",
   "scripts": {
     "start": "node dist/main.js",
+    "start:inv": "node dist/inventory/inventory.bootstrap.js",
+    "start:pym": "node dist/payment/payment.bootstrap.js",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "build": "nest build",
